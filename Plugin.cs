@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using BepInEx;
 using HarmonyLib;
 using UnityEngine;
+using NuclearOption.Networking;
 
 namespace WeaponSkipMod
 {
@@ -16,7 +17,7 @@ namespace WeaponSkipMod
             Log = Logger;
             Harmony harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             harmony.PatchAll();
-            Log.LogInfo("WeaponSkipMod initialized. Refined skipping logic active.");
+            Log.LogInfo("WeaponSkipMod initialized. Client-side multiplayer skipping active.");
         }
     }
 
@@ -27,12 +28,18 @@ namespace WeaponSkipMod
 
         static void Postfix(WeaponManager __instance)
         {
+            // Prevent infinite recursion during auto-skipping
             if (_isSkipping) return;
 
             try
             {
                 var aircraft = Traverse.Create(__instance).Field("aircraft").GetValue<Aircraft>();
-                if (aircraft == null || !GameManager.IsLocalAircraft(aircraft)) return;
+                
+                // MULTIPLAYER CHECK: 
+                // Ensure this aircraft is actually the one the local player is currently flying
+                Aircraft localAircraft;
+                if (!GameManager.GetLocalAircraft(out localAircraft) || aircraft != localAircraft) return;
+                
                 if (aircraft.weaponStations == null || aircraft.weaponStations.Count == 0) return;
 
                 int total = aircraft.weaponStations.Count;
@@ -52,9 +59,10 @@ namespace WeaponSkipMod
                     count++;
                 }
 
+                // If we looped through all stations and still landed on an empty one, deselect entirely
                 if (count >= total && __instance.currentWeaponStation != null && __instance.currentWeaponStation.Ammo <= 0)
                 {
-                    __instance.SetActiveStation(255);
+                    __instance.SetActiveStation(255); // 255 is the standard byte index for 'None'
                     Traverse.Create(__instance).Field("currentWeaponStation").SetValue(null);
                 }
             }
@@ -77,7 +85,10 @@ namespace WeaponSkipMod
             try
             {
                 var aircraft = Traverse.Create(__instance).Field("aircraft").GetValue<Aircraft>();
-                if (aircraft == null || !GameManager.IsLocalAircraft(aircraft)) return;
+                
+                Aircraft localAircraft;
+                if (!GameManager.GetLocalAircraft(out localAircraft) || aircraft != localAircraft) return;
+
                 if (aircraft.weaponStations == null || aircraft.weaponStations.Count == 0) return;
 
                 int total = aircraft.weaponStations.Count;
@@ -117,14 +128,96 @@ namespace WeaponSkipMod
         {
             try
             {
-                if (__instance.Ammo <= 0)
+                Aircraft localAircraft = null;
+                if (GameManager.GetLocalAircraft(out localAircraft) && localAircraft != null)
                 {
-                    if (__instance.Weapons != null && __instance.Weapons.Count > 0)
+                    if (localAircraft.weaponStations != null && localAircraft.weaponStations.Contains(__instance))
                     {
-                        var aircraft = __instance.Weapons[0].attachedUnit as Aircraft;
-                        if (aircraft != null && GameManager.IsLocalAircraft(aircraft) && aircraft.weaponManager != null)
+                        if (__instance.Ammo <= 0)
                         {
-                            if (aircraft.weaponManager.currentWeaponStation == __instance)
+                            if (localAircraft.weaponManager != null && localAircraft.weaponManager.currentWeaponStation == __instance)
+                            {
+                                localAircraft.weaponManager.NextWeaponStation();
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"Silently caught error in AccountAmmo Postfix: {ex}");
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(WeaponManager), "Fire")]
+    public class WeaponManager_Fire_Patch
+    {
+        static void Postfix(WeaponManager __instance)
+        {
+            try
+            {
+                var aircraft = Traverse.Create(__instance).Field("aircraft").GetValue<Aircraft>();
+                Aircraft localAircraft;
+                if (aircraft == null || !GameManager.GetLocalAircraft(out localAircraft) || aircraft != localAircraft) return;
+
+                var current = __instance.currentWeaponStation;
+                if (current != null)
+                {
+                    int activeWeaponsCount = 0;
+                    if (current.Weapons != null)
+                    {
+                        foreach (var w in current.Weapons)
+                        {
+                            if (w != null) activeWeaponsCount++;
+                        }
+                    }
+
+                    if (current.Ammo <= 0 || activeWeaponsCount == 0)
+                    {
+                        __instance.NextWeaponStation();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"Error in WeaponManager.Fire Postfix: {ex}");
+            }
+        }
+    }
+
+    [HarmonyPatch]
+    public class Unit_RpcSyncAmmoCount_Patch
+    {
+        [HarmonyTargetMethod]
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            foreach (var m in typeof(Unit).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance))
+            {
+                if (m.Name.StartsWith("UserCode_RpcSyncAmmoCount"))
+                {
+                    return m;
+                }
+            }
+            return null;
+        }
+
+        static void Postfix(Unit __instance, byte stationIndex, int ammo)
+        {
+            try
+            {
+                var aircraft = __instance as Aircraft;
+                Aircraft localAircraft;
+                
+                if (aircraft != null && GameManager.GetLocalAircraft(out localAircraft) && aircraft == localAircraft)
+                {
+                    if (ammo <= 0 && aircraft.weaponManager != null)
+                    {
+                        if (stationIndex < aircraft.weaponStations.Count)
+                        {
+                            var station = aircraft.weaponStations[stationIndex];
+                            bool isCurrent = aircraft.weaponManager.currentWeaponStation == station;
+                            if (isCurrent)
                             {
                                 aircraft.weaponManager.NextWeaponStation();
                             }
@@ -132,7 +225,56 @@ namespace WeaponSkipMod
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"Error in RpcSyncAmmoCount Postfix: {ex}");
+            }
+        }
+    }
+
+    [HarmonyPatch]
+    public class Unit_RpcSingleRemoteFire_Patch
+    {
+        [HarmonyTargetMethod]
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            foreach (var m in typeof(Unit).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance))
+            {
+                if (m.Name.StartsWith("UserCode_RpcSingleRemoteFire"))
+                {
+                    return m;
+                }
+            }
+            return null;
+        }
+
+        static void Postfix(Unit __instance, byte stationIndex, int ammo)
+        {
+            try
+            {
+                var aircraft = __instance as Aircraft;
+                Aircraft localAircraft;
+
+                if (aircraft != null && GameManager.GetLocalAircraft(out localAircraft) && aircraft == localAircraft)
+                {
+                    if (ammo <= 0 && aircraft.weaponManager != null)
+                    {
+                        if (stationIndex < aircraft.weaponStations.Count)
+                        {
+                            var station = aircraft.weaponStations[stationIndex];
+                            bool isCurrent = aircraft.weaponManager.currentWeaponStation == station;
+                            if (isCurrent)
+                            {
+                                aircraft.weaponManager.NextWeaponStation();
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"Error in RpcSingleRemoteFire Postfix: {ex}");
+            }
         }
     }
 
