@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BepInEx;
+using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
 using NuclearOption.Networking;
@@ -11,10 +12,14 @@ namespace WeaponSkipMod
     public class Plugin : BaseUnityPlugin
     {
         public static BepInEx.Logging.ManualLogSource Log;
+        public static ConfigEntry<bool> EnableAutoSkip;
 
         private void Awake()
         {
             Log = Logger;
+            
+            EnableAutoSkip = Config.Bind("General", "Enable Auto-Skip", true, "If enabled, weapon stations are automatically skipped when they run out of ammo during firing. If disabled, empty stations are only skipped when manually cycling weapons.");
+
             Harmony harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             harmony.PatchAll();
             Log.LogInfo("WeaponSkipMod initialized. Client-side multiplayer skipping active.");
@@ -126,6 +131,7 @@ namespace WeaponSkipMod
     {
         static void Postfix(WeaponStation __instance)
         {
+            if (Plugin.EnableAutoSkip != null && !Plugin.EnableAutoSkip.Value) return;
             try
             {
                 Aircraft localAircraft = null;
@@ -155,6 +161,7 @@ namespace WeaponSkipMod
     {
         static void Postfix(WeaponManager __instance)
         {
+            if (Plugin.EnableAutoSkip != null && !Plugin.EnableAutoSkip.Value) return;
             try
             {
                 var aircraft = Traverse.Create(__instance).Field("aircraft").GetValue<Aircraft>();
@@ -204,6 +211,7 @@ namespace WeaponSkipMod
 
         static void Postfix(Unit __instance, byte stationIndex, int ammo)
         {
+            if (Plugin.EnableAutoSkip != null && !Plugin.EnableAutoSkip.Value) return;
             try
             {
                 var aircraft = __instance as Aircraft;
@@ -250,6 +258,7 @@ namespace WeaponSkipMod
 
         static void Postfix(Unit __instance, byte stationIndex, int ammo)
         {
+            if (Plugin.EnableAutoSkip != null && !Plugin.EnableAutoSkip.Value) return;
             try
             {
                 var aircraft = __instance as Aircraft;
