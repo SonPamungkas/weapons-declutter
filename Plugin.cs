@@ -24,6 +24,31 @@ namespace WeaponSkipMod
             harmony.PatchAll();
             Log.LogInfo("WeaponSkipMod initialized. Client-side multiplayer skipping active.");
         }
+
+        public static int GetLoadedStationsCount(Aircraft aircraft)
+        {
+            if (aircraft == null || aircraft.weaponStations == null) return 0;
+            int loadedCount = 0;
+            foreach (var station in aircraft.weaponStations)
+            {
+                if (station != null && station.Ammo > 0)
+                {
+                    int activeWeaponsCount = 0;
+                    if (station.Weapons != null)
+                    {
+                        foreach (var w in station.Weapons)
+                        {
+                            if (w != null) activeWeaponsCount++;
+                        }
+                    }
+                    if (activeWeaponsCount > 0)
+                    {
+                        loadedCount++;
+                    }
+                }
+            }
+            return loadedCount;
+        }
     }
 
     [HarmonyPatch(typeof(WeaponManager), "NextWeaponStation")]
@@ -45,6 +70,9 @@ namespace WeaponSkipMod
                 Aircraft localAircraft;
                 if (!GameManager.GetLocalAircraft(out localAircraft) || aircraft != localAircraft) return;
                 
+                // Safety check: Disable skipping/cycling if all loaded weapon stations are expended
+                if (Plugin.GetLoadedStationsCount(aircraft) <= 0) return;
+
                 if (aircraft.weaponStations == null || aircraft.weaponStations.Count == 0) return;
 
                 int total = aircraft.weaponStations.Count;
@@ -94,6 +122,9 @@ namespace WeaponSkipMod
                 Aircraft localAircraft;
                 if (!GameManager.GetLocalAircraft(out localAircraft) || aircraft != localAircraft) return;
 
+                // Safety check: Disable skipping/cycling if all loaded weapon stations are expended
+                if (Plugin.GetLoadedStationsCount(aircraft) <= 0) return;
+
                 if (aircraft.weaponStations == null || aircraft.weaponStations.Count == 0) return;
 
                 int total = aircraft.weaponStations.Count;
@@ -139,6 +170,8 @@ namespace WeaponSkipMod
                 {
                     if (localAircraft.weaponStations != null && localAircraft.weaponStations.Contains(__instance))
                     {
+                        // Safety check: Disable auto-skipping if all loaded weapon stations are expended
+                        if (Plugin.GetLoadedStationsCount(localAircraft) <= 0) return;
                         if (__instance.Ammo <= 0)
                         {
                             if (localAircraft.weaponManager != null && localAircraft.weaponManager.currentWeaponStation == __instance)
@@ -167,6 +200,9 @@ namespace WeaponSkipMod
                 var aircraft = Traverse.Create(__instance).Field("aircraft").GetValue<Aircraft>();
                 Aircraft localAircraft;
                 if (aircraft == null || !GameManager.GetLocalAircraft(out localAircraft) || aircraft != localAircraft) return;
+
+                // Safety check: Disable auto-skipping if all loaded weapon stations are expended
+                if (Plugin.GetLoadedStationsCount(aircraft) <= 0) return;
 
                 var current = __instance.currentWeaponStation;
                 if (current != null)
@@ -219,6 +255,8 @@ namespace WeaponSkipMod
                 
                 if (aircraft != null && GameManager.GetLocalAircraft(out localAircraft) && aircraft == localAircraft)
                 {
+                    // Safety check: Disable auto-skipping if all loaded weapon stations are expended
+                    if (Plugin.GetLoadedStationsCount(aircraft) <= 0) return;
                     if (ammo <= 0 && aircraft.weaponManager != null)
                     {
                         if (stationIndex < aircraft.weaponStations.Count)
@@ -266,6 +304,8 @@ namespace WeaponSkipMod
 
                 if (aircraft != null && GameManager.GetLocalAircraft(out localAircraft) && aircraft == localAircraft)
                 {
+                    // Safety check: Disable auto-skipping if all loaded weapon stations are expended
+                    if (Plugin.GetLoadedStationsCount(aircraft) <= 0) return;
                     if (ammo <= 0 && aircraft.weaponManager != null)
                     {
                         if (stationIndex < aircraft.weaponStations.Count)
