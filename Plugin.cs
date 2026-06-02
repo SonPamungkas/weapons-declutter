@@ -70,8 +70,8 @@ namespace WeaponSkipMod
                 Aircraft localAircraft;
                 if (!GameManager.GetLocalAircraft(out localAircraft) || aircraft != localAircraft) return;
                 
-                // Safety check: Disable skipping/cycling if all loaded weapon stations are expended
-                if (Plugin.GetLoadedStationsCount(aircraft) <= 0) return;
+                // Safety check: Disable skipping/cycling if 1 or 0 loaded weapon stations remain
+                if (Plugin.GetLoadedStationsCount(aircraft) <= 1) return;
 
                 if (aircraft.weaponStations == null || aircraft.weaponStations.Count == 0) return;
 
@@ -122,8 +122,8 @@ namespace WeaponSkipMod
                 Aircraft localAircraft;
                 if (!GameManager.GetLocalAircraft(out localAircraft) || aircraft != localAircraft) return;
 
-                // Safety check: Disable skipping/cycling if all loaded weapon stations are expended
-                if (Plugin.GetLoadedStationsCount(aircraft) <= 0) return;
+                // Safety check: Disable skipping/cycling if 1 or 0 loaded weapon stations remain
+                if (Plugin.GetLoadedStationsCount(aircraft) <= 1) return;
 
                 if (aircraft.weaponStations == null || aircraft.weaponStations.Count == 0) return;
 
